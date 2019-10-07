@@ -147,6 +147,8 @@ req_android_arch="'"$ARCH"'";
 req_android_sdk="'"$API"'";
 req_android_version="'"$PLATFORM"'";
 
+timestamp=$(date +%s);
+
 '"$KEYBDLIBS"'
 faceLock_lib_filename="'"$FACELOCKLIB"'";
 atvremote_lib_filename="libatv_uinputbridge.so"
@@ -731,6 +733,17 @@ get_prop() {
   fi
 }
 
+mk_system_root() {
+  if [ -d "/system_root" ] && [ -z "$system_root_tmp" ]; then
+    system_root_tmp=true
+    ui_print "- Moving original /system_root";
+    mkdir /system_root_$timestamp
+    mv /system_root/* /system_root_$timestamp/
+  else
+    mkdir /system_root
+  fi
+}
+
 set_progress() { echo "set_progress $1" > "$OUTFD"; }
 
 ui_print() {
@@ -800,12 +813,13 @@ block=/dev/block/bootdevice/by-name/system
 device_abpartition=false
 system_as_root=`getprop ro.build.system_root_image`
 if [ "$system_as_root" == "true" ]; then
+  ui_print "- Device is system-as-root"
   active_slot=`getprop ro.boot.slot_suffix`
   if [ ! -z "$active_slot" ]; then
     device_abpartition=true
     block=/dev/block/bootdevice/by-name/system$active_slot
   fi
-  mkdir -p /system_root
+  mk_system_root;
   SYSTEM_MOUNT=/system_root
   SYSTEM=$SYSTEM_MOUNT/system
 else
@@ -820,9 +834,10 @@ grep -q "$SYSTEM_MOUNT.*\sro[\s,]" /proc/mounts && mount -o remount,rw $SYSTEM_M
 
 # Remount /system to /system_root if we have system-as-root and bind /system to /system_root/system (like Magisk does)
 # For reference, check https://github.com/topjohnwu/Magisk/blob/master/scripts/util_functions.sh
-if [ -f $SYSTEM_MOUNT/init.rc ]; then
-  system_as_root=true
-  mkdir -p /system_root
+if [ -f $SYSTEM/init.rc ]; then
+  ui_print "- Device is system-as-root"
+  ui_print "- Remounting /system as /system_root";
+  mk_system_root;
   mount --move /system /system_root
   mount -o bind /system_root/system /system
   SYSTEM_MOUNT=/system_root
@@ -832,7 +847,6 @@ else
   # Just add $SYSTEM_MOUNT to the mount list
   mounts="$mounts $SYSTEM_MOUNT"
 fi
-$system_as_root && ui_print "- Device is system-as-root"
 ui_print " ";
 
 # _____________________________________________________________________________________________________________________
@@ -949,11 +963,16 @@ exxit() {
   fi
   find $TMP/* -maxdepth 0 ! -path "$rec_tmp_log" -exec rm -rf {} +
   set_progress 1.0
-  ui_print "- Unmounting $mounts"
-  ui_print " "
+  ui_print "- Unmounting $mounts";
   for m in $mounts; do
     umount "$m"
   done
+  if [ ! -z "$system_root_tmp" ]; then
+    ui_print "- Restoring original /system_root";
+    mv /system_root_$timestamp/* /system_root/
+    rm -rf /system_root_$timestamp
+  fi
+  ui_print " ";
   exit "$1"
 }
 
@@ -2327,8 +2346,8 @@ for aosp_name in $aosp_remove_list; do
   eval "list_name=\$${aosp_name}_list";
   list_name=$(echo "${list_name}" | sort -r); # reverse sort list for more readable output
   for file_name in $list_name; do
-    rm -rf "$SYSTEM/$file_name" && rm -rf "/product/$file_name";
-    sed -i "\:# Remove Stock/AOSP apps (from GApps Installer):a \    rm -rf \$SYS/$file_name && rm -rf /product/$file_name" $bkup_tail;
+    rm -rf "$SYSTEM/$file_name" && rm -rf "$SYSTEM/product/$file_name" && rm -rf "/product/$file_name";
+    sed -i "\:# Remove Stock/AOSP apps (from GApps Installer):a \    rm -rf \$SYS/$file_name && rm -rf \$SYS/product/$file_name && rm -rf /product/$file_name" $bkup_tail;
   done;
 done;
 
